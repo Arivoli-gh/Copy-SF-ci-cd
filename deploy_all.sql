@@ -1,0 +1,14 @@
+-- deploy_all.sql : executed INSIDE Snowflake from the Git repository
+-- Variables are passed with: EXECUTE IMMEDIATE FROM ... USING (db_name => '...', commit_sha => '...')
+USE ROLE CICD_DEPLOY_ROLE;
+USE WAREHOUSE CICD_WH;
+USE DATABASE IDENTIFIER('{{ db_name }}');
+ 
+-- Ordered, idempotent migrations (paths are relative to this file)
+EXECUTE IMMEDIATE FROM './migrations/V1.0.0__create_customers_table.sql';
+EXECUTE IMMEDIATE FROM './migrations/V1.0.1__create_orders_table.sql';
+EXECUTE IMMEDIATE FROM './migrations/V1.0.2__create_customer_orders_view.sql';
+ 
+-- Audit trail
+INSERT INTO CICD_DB.OPS.DEPLOY_LOG
+  SELECT '{{ db_name }}', '{{ commit_sha }}', CURRENT_TIMESTAMP();
