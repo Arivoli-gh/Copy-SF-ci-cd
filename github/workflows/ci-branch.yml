@@ -1,0 +1,50 @@
+name: CI - Branch
+on:
+  push:
+    branches-ignore: [main]
+ 
+concurrency:
+  group: deploy-dev           # one DEV deployment at a time
+  cancel-in-progress: false
+ 
+env:
+  SNOWFLAKE_CONNECTIONS_DEFAULT_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+  SNOWFLAKE_CONNECTIONS_DEFAULT_USER: ${{ secrets.SNOWFLAKE_USER }}
+  SNOWFLAKE_CONNECTIONS_DEFAULT_AUTHENTICATOR: SNOWFLAKE_JWT
+  SNOWFLAKE_CONNECTIONS_DEFAULT_PRIVATE_KEY_FILE: /tmp/rsa_key.p8
+  PRIVATE_KEY_PASSPHRASE: ${{ secrets.SNOWFLAKE_PASSPHRASE }}
+  REPO_STAGE: "@CICD_DB.GIT.CICD_REPO"
+ 
+jobs:
+  validate-dev:                   # required status check on main
+    runs-on: ubuntu-latest        # GitHub-hosted cloud runner
+    environment: dev
+    steps:
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install snowflake-cli
+      - name: Write private key (Option B; omit when using OIDC)
+        run: echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/rsa_key.p8 && chmod 600 /tmp/rsa_key.p8
+      - name: Fetch branch and deploy to DEMO_DEV
+        run: |
+          snow sql -q "ALTER GIT REPOSITORY CICD_DB.GIT.CICD_REPO FETCH"
+          snow sql -q "EXECUTE IMMEDIATE FROM $REPO_STAGE/branches/${{ github.ref_name }}/deploy_all.sql USING (db_name => 'DEMO_DEV', commit_sha => '${{ github.sha }}')"
+      - name: Run smoke tests in DEMO_DEV
+        run: snow sql -q "EXECUTE IMMEDIATE FROM $REPO_STAGE/branches/${{ github.ref_name }}/tests/smoke_tests.sql USING (db_name => 'DEMO_DEV')"
+ 
+  open-pr-and-automerge:
+    needs: validate-dev
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GH_AUTOMATION_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Open PR if none exists, then enable auto-merge
+        run: |
+          BRANCH="${{ github.ref_name }}"
+          if [ -z "$(gh pr list --head "$BRANCH" --base main --json number -q '.[0].number')" ]; then
+            gh pr create --base main --head "$BRANCH" \
+              --title "Deploy: $BRANCH" \
+              --body "Auto-created after DEV deploy and tests passed (commit ${{ github.sha }})."
+          fi
+          gh pr merge "$BRANCH" --auto --squash --delete-branch
