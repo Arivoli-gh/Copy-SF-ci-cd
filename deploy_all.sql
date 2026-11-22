@@ -5,7 +5,7 @@ USE WAREHOUSE CICD_WH;
 USE DATABASE IDENTIFIER('{{ db_name }}');
  
 -- Ordered, idempotent migrations (paths are relative to this file)
-EXECUTE IMMEDIATE FROM './migrations/V1.0.0__deployment20261121.sql';
+EXECUTE IMMEDIATE FROM './Migration/V1.0.0__deployment20261121.sql';
  
 -- Audit trail
 INSERT INTO CICD_DB.OPS.DEPLOY_LOG
