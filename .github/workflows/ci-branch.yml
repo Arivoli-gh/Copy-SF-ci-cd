@@ -23,8 +23,20 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.11' }
       - run: pip install snowflake-cli
-      - name: Write private key (Option B; omit when using OIDC)
-        run: echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/rsa_key.p8 && chmod 600 /tmp/rsa_key.p8
+      - name: Write private key
+        run: |
+          printf "%s\n" "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/rsa_key.p8
+          chmod 600 /tmp/rsa_key.p8
+          head -n 1 /tmp/rsa_key.p8
+          tail -n 1 /tmp/rsa_key.p8
+          openssl rsa -in /tmp/rsa_key.p8 -passin env:PRIVATE_KEY_PASSPHRASE -noout && echo "Key & Passphrase VALID!"
+      - name: Create Snowflake Config & Test Connectivity
+        run: |
+          mkdir -p ~/.snowflake
+          printf 'default_connection_name = "default"\n\n[connections.default]\naccount = "%s"\nuser = "%s"\nauthenticator = "SNOWFLAKE_JWT"\nprivate_key_file = "/tmp/rsa_key.p8"\n' \
+            "${{ vars.SNOWFLAKE_ACCOUNT }}" \
+            "${{ vars.SNOWFLAKE_USER }}" > ~/.snowflake/config.toml
+          chmod 600 ~/.snowflake/config.toml
       - name: Fetch branch and deploy to DEMO_DEV
         run: |
           snow sql -q "ALTER GIT REPOSITORY CICD_DB.GIT.CICD_REPO FETCH"
@@ -47,4 +59,4 @@ jobs:
               --title "Deploy: $BRANCH" \
               --body "Auto-created after DEV deploy and tests passed (commit ${{ github.sha }})."
           fi
-          gh pr merge "$BRANCH" --auto --squash --delete-branch
+          gh pr merge "$BRANCH" --auto --squash
