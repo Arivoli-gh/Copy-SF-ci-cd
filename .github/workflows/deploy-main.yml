@@ -24,6 +24,12 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.11' }
       - run: pip install snowflake-cli
+      - name: 1. Verify GitHub Variables & Secrets are loaded
+        run: |
+          echo "Account length: ${#SNOWFLAKE_ACCOUNT}"
+          echo "User length: ${#SNOWFLAKE_USER}"
+          echo "Private Key length: ${#SNOWFLAKE_PRIVATE_KEY}"
+          echo "Passphrase length: ${#SNOWFLAKE_PASSPHRASE}"
       - name: Write private key
         run: |
           printf "%s\n" "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/rsa_key.p8
