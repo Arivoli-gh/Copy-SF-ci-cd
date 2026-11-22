@@ -14,6 +14,7 @@ env:
   SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT
   SNOWFLAKE_PRIVATE_KEY_FILE: /tmp/rsa_key.p8
   PRIVATE_KEY_PASSPHRASE: ${{ secrets.SNOWFLAKE_PASSPHRASE }}
+  REPO_STAGE: "@CICD_DB.GIT.CICD_REPO"
  
 jobs:
   deploy-prod:
@@ -40,4 +41,4 @@ jobs:
       - name: Fetch main and deploy the same code to DEMO_PROD
         run: |
           snow sql -q "ALTER GIT REPOSITORY CICD_DB.GIT.CICD_REPO FETCH"
-          snow sql -q "EXECUTE IMMEDIATE FROM @CICD_DB.GIT.CICD_REPO/branches/main/deploy_all.sql USING (db_name => 'DEMO_PROD', commit_sha => '${{ github.sha }}')"
+          snow sql -q "EXECUTE IMMEDIATE FROM $REPO_STAGE/branches/main/deploy_all.sql USING (db_name => 'DEMO_PROD', commit_sha => '${{ github.sha }}')"
