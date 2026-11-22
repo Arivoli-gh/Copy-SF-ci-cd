@@ -48,7 +48,7 @@ jobs:
     needs: validate-dev
     runs-on: ubuntu-latest
     env:
-      GH_TOKEN: ${{ secrets.GH_AUTOMATION_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
       - name: Open PR if none exists, then enable auto-merge
