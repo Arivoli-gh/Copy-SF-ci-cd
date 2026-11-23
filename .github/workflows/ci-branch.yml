@@ -69,6 +69,10 @@ jobs:
   open-pr-and-automerge:
     needs: validate-dev
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
@@ -81,4 +85,13 @@ jobs:
               --title "Deploy: $BRANCH" \
               --body "Auto-created after DEV deploy passed (commit ${{ github.sha }})."
           fi
-          gh pr merge "$BRANCH" --auto --squash
+          for i in 1 2 3 4 5; do
+            if gh pr merge "$BRANCH" --auto --squash; then
+              echo "Auto-merge enabled."
+              exit 0
+            fi
+            echo "Attempt $i failed, retrying in 15s..."
+            sleep 15
+          done
+          echo "Could not enable auto-merge after 5 attempts."
+          exit 1
