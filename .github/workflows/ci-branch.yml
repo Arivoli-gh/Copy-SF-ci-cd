@@ -12,7 +12,6 @@ env:
   TARGET_DB: DEMO_DEV
   SNOWFLAKE_ACCOUNT: ${{ vars.SNOWFLAKE_ACCOUNT }}
   SNOWFLAKE_USER: ${{ vars.SNOWFLAKE_USER }}
-  SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
   PRIVATE_KEY_PASSPHRASE: ${{ secrets.SNOWFLAKE_PASSPHRASE }}
 
 jobs:
@@ -48,7 +47,6 @@ jobs:
           [connections.default]
           account = "$SNOWFLAKE_ACCOUNT"
           user = "$SNOWFLAKE_USER"
-          warehouse = "$SNOWFLAKE_WAREHOUSE"
           authenticator = "SNOWFLAKE_JWT"
           private_key_file = "/tmp/rsa_key.p8"
           private_key_file_pwd = "$PRIVATE_KEY_PASSPHRASE"
@@ -60,7 +58,6 @@ jobs:
           [dev]
           account = "$SNOWFLAKE_ACCOUNT"
           user = "$SNOWFLAKE_USER"
-          warehouse = "$SNOWFLAKE_WAREHOUSE"
           authenticator = "SNOWFLAKE_JWT"
           private_key_file = "/tmp/rsa_key.p8"
           private_key_file_pwd = "$PRIVATE_KEY_PASSPHRASE"
