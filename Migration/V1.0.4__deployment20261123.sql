@@ -1,0 +1,14 @@
+CREATE TABLE IF NOT EXISTS APP.ORDER_ITEMS (
+  ITEM_ID      NUMBER,
+  ORDER_ID     NUMBER NOT NULL,
+  PRODUCT_NAME VARCHAR(200) NOT NULL,
+  QUANTITY     NUMBER NOT NULL,
+  UNIT_PRICE   NUMBER(12,2) NOT NULL
+);
+
+INSERT INTO APP.ORDER_ITEMS (ITEM_ID, ORDER_ID, PRODUCT_NAME, QUANTITY, UNIT_PRICE) VALUES
+  (9001, 5001, 'Wireless Mechanical Keyboard', 1, 1499.50),
+  (9002, 5002, 'USB-C Hub Adapter',            1, 450.00),
+  (9003, 5003, '27-Inch IPS Monitor',          1, 2999.99),
+  (9004, 5004, 'Braided Charging Cable',       1, 125.75),
+  (9005, 5005, 'Ergonomic Mouse',              2, 445.10);
