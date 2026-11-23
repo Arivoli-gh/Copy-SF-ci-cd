@@ -1,50 +1,68 @@
 name: Deploy - Main
+
 on:
   push:
     branches: [main]
   workflow_dispatch:
- 
+
 concurrency:
   group: deploy-prod
   cancel-in-progress: false
- 
+
 env:
   SNOWFLAKE_ACCOUNT: ${{ vars.SNOWFLAKE_ACCOUNT }}
   SNOWFLAKE_USER: ${{ vars.SNOWFLAKE_USER }}
   SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT
   SNOWFLAKE_PRIVATE_KEY_FILE: /tmp/rsa_key.p8
   PRIVATE_KEY_PASSPHRASE: ${{ secrets.SNOWFLAKE_PASSPHRASE }}
-  REPO_STAGE: "@CICD_DB.GIT.CICD_REPO"
- 
+
 jobs:
   deploy-prod:
     runs-on: ubuntu-latest
     environment: prod
     steps:
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.11' }
-      - run: pip install snowflake-cli
-      - name: 1. Verify GitHub Variables & Secrets are loaded
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Installing required packages
         run: |
-          echo "Account length: ${#SNOWFLAKE_ACCOUNT}"
-          echo "User length: ${#SNOWFLAKE_USER}"
-          echo "Private Key length: ${#SNOWFLAKE_PRIVATE_KEY}"
-          echo "Passphrase length: ${#SNOWFLAKE_PASSPHRASE}"
+          pip install snowflake
+          pip install snowflake-connector-python
+          pip install schemachange
+          pip install tomli
+
       - name: Write private key
         run: |
           printf "%s\n" "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/rsa_key.p8
           chmod 600 /tmp/rsa_key.p8
-          head -n 1 /tmp/rsa_key.p8
-          tail -n 1 /tmp/rsa_key.p8
           openssl rsa -in /tmp/rsa_key.p8 -passin env:PRIVATE_KEY_PASSPHRASE -noout && echo "Key & Passphrase VALID!"
-      - name: Create Snowflake Config & Test Connectivity
+
+      - name: Create connections.toml
         run: |
-          mkdir -p ~/.snowflake
-          printf 'default_connection_name = "default"\n\n[connections.default]\naccount = "%s"\nuser = "%s"\nauthenticator = "SNOWFLAKE_JWT"\nprivate_key_file = "/tmp/rsa_key.p8"\n' \
-            "${{ vars.SNOWFLAKE_ACCOUNT }}" \
-            "${{ vars.SNOWFLAKE_USER }}" > ~/.snowflake/config.toml
-          chmod 600 ~/.snowflake/config.toml
-      - name: Fetch main and deploy the same code to DEMO_PROD
+          mkdir -p ./config
+          echo "[snowflake]" > ./config/connections.toml
+          echo "account = \"${{ vars.SNOWFLAKE_ACCOUNT }}\"" >> ./config/connections.toml
+          echo "user = \"${{ vars.SNOWFLAKE_USER }}\"" >> ./config/connections.toml
+          echo "database = \"DEMO_PROD\"" >> ./config/connections.toml
+          echo "private_key_file = \"/tmp/rsa_key.p8\"" >> ./config/connections.toml
+          echo "private_key_file_pwd = \"${{ secrets.SNOWFLAKE_PASSPHRASE }}\"" >> ./config/connections.toml
+          echo "authenticator = \"snowflake_jwt\"" >> ./config/connections.toml
+          chmod 600 ./config/connections.toml
+
+      - name: Run schemachange on all folders (DEMO_PROD)
         run: |
-          snow sql -q "ALTER GIT REPOSITORY CICD_DB.GIT.CICD_REPO FETCH"
-          snow sql -q "EXECUTE IMMEDIATE FROM $REPO_STAGE/branches/main/deploy_all.sql USING (db_name => 'DEMO_PROD', commit_sha => '${{ github.sha }}')"
+          echo "==================== START DEPLOYMENT ================="
+          echo "Processing folder $(basename "$GITHUB_WORKSPACE") ..."
+          schemachange -f $GITHUB_WORKSPACE \
+                        --connections-file-path ./config/connections.toml \
+                        --connection-name snowflake -c DEMO_PROD.SCHEMACHANGE.CHANGE_HISTORY --create-change-history-table \
+                        --vars '{"DATABASE": "DEMO_PROD", "COMMIT_SHA": "${{ github.sha }}"}'
+
+      - name: Clean up private key
+        if: always()
+        run: rm -f /tmp/rsa_key.p8
