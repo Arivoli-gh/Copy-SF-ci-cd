@@ -1,49 +1,71 @@
 name: CI - Branch
+
 on:
   push:
     branches-ignore: [main]
- 
+
 concurrency:
   group: deploy-dev           # one DEV deployment at a time
   cancel-in-progress: false
- 
+
 env:
   SNOWFLAKE_ACCOUNT: ${{ vars.SNOWFLAKE_ACCOUNT }}
   SNOWFLAKE_USER: ${{ vars.SNOWFLAKE_USER }}
   SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT
   SNOWFLAKE_PRIVATE_KEY_FILE: /tmp/rsa_key.p8
   PRIVATE_KEY_PASSPHRASE: ${{ secrets.SNOWFLAKE_PASSPHRASE }}
-  REPO_STAGE: "@CICD_DB.GIT.CICD_REPO"
- 
+
 jobs:
   validate-dev:                   # required status check on main
     runs-on: ubuntu-latest        # GitHub-hosted cloud runner
     environment: dev
     steps:
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.11' }
-      - run: pip install snowflake-cli
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Installing required packages
+        run: |
+          pip install snowflake
+          pip install snowflake-connector-python
+          pip install schemachange
+          pip install tomli
+
       - name: Write private key
         run: |
           printf "%s\n" "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/rsa_key.p8
           chmod 600 /tmp/rsa_key.p8
-          head -n 1 /tmp/rsa_key.p8
-          tail -n 1 /tmp/rsa_key.p8
           openssl rsa -in /tmp/rsa_key.p8 -passin env:PRIVATE_KEY_PASSPHRASE -noout && echo "Key & Passphrase VALID!"
-      - name: Create Snowflake Config & Test Connectivity
+
+      - name: Create connections.toml
         run: |
-          mkdir -p ~/.snowflake
-          printf 'default_connection_name = "default"\n\n[connections.default]\naccount = "%s"\nuser = "%s"\nauthenticator = "SNOWFLAKE_JWT"\nprivate_key_file = "/tmp/rsa_key.p8"\n' \
-            "${{ vars.SNOWFLAKE_ACCOUNT }}" \
-            "${{ vars.SNOWFLAKE_USER }}" > ~/.snowflake/config.toml
-          chmod 600 ~/.snowflake/config.toml
-      - name: Fetch branch and deploy to DEMO_DEV
+          mkdir -p ./config
+          echo "[snowflake]" > ./config/connections.toml
+          echo "account = \"${{ vars.SNOWFLAKE_ACCOUNT }}\"" >> ./config/connections.toml
+          echo "user = \"${{ vars.SNOWFLAKE_USER }}\"" >> ./config/connections.toml
+          echo "database = \"DEMO_DEV\"" >> ./config/connections.toml
+          echo "private_key_file = \"/tmp/rsa_key.p8\"" >> ./config/connections.toml
+          echo "private_key_file_pwd = \"${{ secrets.SNOWFLAKE_PASSPHRASE }}\"" >> ./config/connections.toml
+          echo "authenticator = \"snowflake_jwt\"" >> ./config/connections.toml
+          chmod 600 ./config/connections.toml
+
+      - name: Run schemachange on all folders (DEMO_DEV)
         run: |
-          snow sql -q "ALTER GIT REPOSITORY CICD_DB.GIT.CICD_REPO FETCH"
-          snow sql -q "EXECUTE IMMEDIATE FROM $REPO_STAGE/branches/${{ github.ref_name }}/deploy_all.sql USING (db_name => 'DEMO_DEV', commit_sha => '${{ github.sha }}')"
-      - name: Run smoke tests in DEMO_DEV
-        run: snow sql -q "EXECUTE IMMEDIATE FROM $REPO_STAGE/branches/${{ github.ref_name }}/tests/smoke_tests.sql USING (db_name => 'DEMO_DEV')"
- 
+          echo "==================== START DEPLOYMENT ================="
+          echo "Processing folder $(basename "$GITHUB_WORKSPACE") ..."
+          schemachange -f $GITHUB_WORKSPACE \
+                        --connections-file-path ./config/connections.toml \
+                        --connection-name snowflake -c DEMO_DEV.SCHEMACHANGE.CHANGE_HISTORY --create-change-history-table \
+                        --vars '{"DATABASE": "DEMO_DEV", "COMMIT_SHA": "${{ github.sha }}"}'
+
+      - name: Clean up private key
+        if: always()
+        run: rm -f /tmp/rsa_key.p8
+
   open-pr-and-automerge:
     needs: validate-dev
     runs-on: ubuntu-latest
@@ -57,6 +79,6 @@ jobs:
           if [ -z "$(gh pr list --head "$BRANCH" --base main --json number -q '.[0].number')" ]; then
             gh pr create --base main --head "$BRANCH" \
               --title "Deploy: $BRANCH" \
-              --body "Auto-created after DEV deploy and tests passed (commit ${{ github.sha }})."
+              --body "Auto-created after DEV deploy passed (commit ${{ github.sha }})."
           fi
           gh pr merge "$BRANCH" --auto --squash

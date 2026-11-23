@@ -1,4 +1,6 @@
 -- CUSTOMERS (CUSTOMER_ID and CREATED_AT are auto-populated)
+TRUNCATE TABLE APP.CUSTOMERS;
+TRUNCATE TABLE APP.ORDERS;
 INSERT INTO APP.CUSTOMERS (FULL_NAME, EMAIL) VALUES
   ('Aarav Sharma',   'aarav.sharma@example.com'),
   ('Priya Nair',     'priya.nair@example.com'),
