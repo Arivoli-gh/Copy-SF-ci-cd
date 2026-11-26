@@ -1,0 +1,8 @@
+# Object requests: one fully qualified object name per line.
+# Push this file to a branch; the "Generate Migrations" workflow creates the
+# next V<version>__ file in migrations/ for each line and removes the line.
+# Optional type:   DEMO_DEV.APP.SALES_DT | DYNAMIC_TABLE
+# Functions/procedures need argument types:   DEMO_DEV.APP.MY_PROC(VARCHAR, NUMBER)
+#
+# DEMO_DEV.APP.CUSTOMERS
+# DEMO_DEV.APP.CUSTOMER_ORDERS
