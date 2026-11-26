@@ -3,6 +3,8 @@ name: Deploy - Main
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'requests/**'      # object list pushes do not deploy
   workflow_dispatch:
 
 concurrency:
