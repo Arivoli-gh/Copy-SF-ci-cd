@@ -3,7 +3,8 @@ name: CI - Branch
 on:
   push:
     branches-ignore: [main]
-
+    paths-ignore:
+      - 'requests/**'      # object list pushes do not deploy
 concurrency:
   group: deploy-dev           # one DEV deployment at a time
   cancel-in-progress: false
