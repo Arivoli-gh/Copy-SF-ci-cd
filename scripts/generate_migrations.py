@@ -7,6 +7,11 @@ creates the next versioned schemachange file in the migrations folder, with the
 database name replaced by {{ DATABASE }}. Lines that were processed are removed
 from the list; lines that failed stay in the list with a "# FAILED:" comment.
 
+File names follow the pattern  V<next version>__<prefix><YYYYMMDD>.sql
+for example  V1.0.5__deployment20261124.sql
+Every object gets its own file and its own version, so names never collide even
+when several objects are processed on the same day.
+
 List file format (requests/objects.txt):
     # comment lines and blank lines are ignored
     DEMO_DEV.APP.CUSTOMERS
@@ -17,14 +22,18 @@ List file format (requests/objects.txt):
 Usage (run from the repository root):
     python scripts/generate_migrations.py --list-file requests/objects.txt \
         --migrations-dir migrations --connection snowflake
+Optional: --prefix deployment   (text before the date, default "deployment")
+          --date 20261124       (default: today's date, UTC)
 Versions continue from the highest V<version>__ file found anywhere in the repo.
 """
 import argparse
+import datetime
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from create_migration_file import build_content, fetch_ddl, next_version, slug, split_name  # noqa: E402
+from create_migration_file import build_content, fetch_ddl, next_version, split_name  # noqa: E402
 
 
 def repo_files(root):
@@ -35,8 +44,10 @@ def repo_files(root):
     return out
 
 
-def process(cur, lines, repo_root, migrations_dir, bump="patch", var="DATABASE", add_schema=True):
+def process(cur, lines, repo_root, migrations_dir, bump="patch", var="DATABASE", add_schema=True,
+            prefix="deployment", date_tag=None):
     """Returns (created_files, failed [(name, reason)], lines_to_keep)."""
+    date_tag = date_tag or datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d")
     known = repo_files(repo_root)
     created, failed, kept, seen = [], [], [], set()
     for raw in lines:
@@ -59,7 +70,7 @@ def process(cur, lines, repo_root, migrations_dir, bump="patch", var="DATABASE",
             obj_type, ddl = fetch_ddl(cur, name, typ)
             content, count, warns = build_content(name, obj_type, ddl, parts, var, add_schema)
             version = next_version(known, bump)
-            fname = "V%s__create_%s_%s_%s.sql" % (version, slug(obj_type), slug(parts[1]), slug(parts[2]))
+            fname = "V%s__%s%s.sql" % (version, prefix, date_tag)
             os.makedirs(migrations_dir, exist_ok=True)
             path = os.path.join(migrations_dir, fname)
             with open(path, "w", encoding="utf-8", newline="\n") as fh:
@@ -86,8 +97,17 @@ def main():
     ap.add_argument("--bump", choices=["patch", "minor", "major"], default="patch")
     ap.add_argument("--var-name", default="DATABASE")
     ap.add_argument("--no-schema", action="store_true")
+    ap.add_argument("--prefix", default="deployment", help="Text placed before the date in the file name")
+    ap.add_argument("--date", help="Date tag YYYYMMDD for the file name (default: today, UTC)")
     ap.add_argument("--connection", help="Connection name in connections.toml (default connection if omitted)")
     args = ap.parse_args()
+
+    if args.date and not re.fullmatch(r"\d{8}", args.date):
+        print("--date must be YYYYMMDD, for example 20261124", file=sys.stderr)
+        return 2
+    if not re.fullmatch(r"[A-Za-z0-9_]*", args.prefix):
+        print("--prefix may contain only letters, digits and underscores", file=sys.stderr)
+        return 2
 
     if not os.path.isfile(args.list_file):
         print("List file not found: %s (nothing to do)" % args.list_file)
@@ -102,7 +122,8 @@ def main():
     conn = snowflake.connector.connect(connection_name=args.connection) if args.connection else snowflake.connector.connect()
     try:
         created, failed, kept = process(conn.cursor(), lines, args.repo_root, args.migrations_dir,
-                                        args.bump, args.var_name, not args.no_schema)
+                                        args.bump, args.var_name, not args.no_schema,
+                                        args.prefix, args.date)
     finally:
         conn.close()
 
