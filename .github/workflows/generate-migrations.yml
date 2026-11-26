@@ -1,0 +1,81 @@
+name: Generate Migrations
+
+on:
+  push:
+    branches-ignore: [main]
+    paths:
+      - 'requests/**'
+
+concurrency:
+  group: generate-migrations-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  PRIVATE_KEY_PASSPHRASE: ${{ secrets.SNOWFLAKE_PASSPHRASE }}
+
+jobs:
+  generate:
+    # Skip the run caused by the generator's own commit
+    if: ${{ !contains(github.event.head_commit.message, '[generated]') }}
+    runs-on: ubuntu-latest
+    environment: dev
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.PR_PAT }}   # push with the PAT so that CI - Branch is triggered
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Installing required packages
+        run: |
+          pip install snowflake-connector-python
+          pip install tomli
+
+      - name: Write private key
+        run: |
+          printf "%s\n" "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/rsa_key.p8
+          chmod 600 /tmp/rsa_key.p8
+          openssl rsa -in /tmp/rsa_key.p8 -passin env:PRIVATE_KEY_PASSPHRASE -noout && echo "Key & Passphrase VALID!"
+
+      - name: Create connections.toml
+        run: |
+          mkdir -p ~/.snowflake
+          echo "[snowflake]" > ~/.snowflake/connections.toml
+          echo "account = \"${{ vars.SNOWFLAKE_ACCOUNT }}\"" >> ~/.snowflake/connections.toml
+          echo "user = \"${{ vars.SNOWFLAKE_USER }}\"" >> ~/.snowflake/connections.toml
+          echo "database = \"DEMO_DEV\"" >> ~/.snowflake/connections.toml
+          echo "private_key_file = \"/tmp/rsa_key.p8\"" >> ~/.snowflake/connections.toml
+          echo "private_key_file_pwd = \"${{ secrets.SNOWFLAKE_PASSPHRASE }}\"" >> ~/.snowflake/connections.toml
+          echo "authenticator = \"snowflake_jwt\"" >> ~/.snowflake/connections.toml
+          chmod 600 ~/.snowflake/connections.toml
+
+      - name: Generate migration files from the object list
+        run: |
+          python scripts/generate_migrations.py \
+            --list-file requests/objects.txt \
+            --migrations-dir migrations \
+            --connection snowflake
+
+      - name: Commit and push generated files
+        if: always()
+        run: |
+          mkdir -p migrations
+          git config user.name "migration-bot"
+          git config user.email "migration-bot@users.noreply.github.com"
+          git add migrations requests
+          if git diff --cached --quiet; then
+            echo "Nothing to commit"
+            exit 0
+          fi
+          git commit -m "Generate migration files from object list [generated]"
+          git push
+
+      - name: Clean up secrets
+        if: always()
+        run: rm -f /tmp/rsa_key.p8 ~/.snowflake/connections.toml
