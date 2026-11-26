@@ -65,7 +65,7 @@ jobs:
       - name: Commit and push generated files
         if: success()
         run: |
-          mkdir -p Migrations
+          mkdir -p Migration
           git config user.name "migration-bot"
           git config user.email "migration-bot@users.noreply.github.com"
           git add migrations requests
