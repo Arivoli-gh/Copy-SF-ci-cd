@@ -4,7 +4,7 @@ create_migration_file.py
 
 Reads the DDL of a Snowflake object, replaces the database name with the
 schemachange variable {{ DATABASE }}, picks the next free versioned file name
-(V<next>__create_<type>_<schema>_<object>.sql) and puts the file into a
+(V<next>__deployment<YYYYMMDD>.sql, e.g. V1.0.5__deployment20261124.sql) and puts the file into a
 Snowflake workspace (the live version, so it shows up as an added file in the
 Git workspace, ready to commit and push).
 
@@ -195,13 +195,20 @@ def main():
     ap.add_argument("--folder", default="migrations", help="Folder inside the workspace (default: migrations)")
     ap.add_argument("--type", help="Object type for GET_DDL (default: auto-detect)")
     ap.add_argument("--bump", choices=["patch", "minor", "major"], default="patch", help="Which version part to increase")
-    ap.add_argument("--description", help="Text for the file name after V<version>__")
+    ap.add_argument("--description", help="Full text for the file name after V<version>__ (replaces prefix + date)")
+    ap.add_argument("--prefix", default="deployment", help="Text before the date in the file name (default: deployment)")
+    ap.add_argument("--date", help="Date tag YYYYMMDD for the file name (default: today, UTC)")
     ap.add_argument("--var-name", default="DATABASE", help="schemachange variable name (default: DATABASE)")
     ap.add_argument("--no-schema", action="store_true", help="Do not add CREATE SCHEMA IF NOT EXISTS")
     ap.add_argument("--connection", help="Connection name in connections.toml (default connection if omitted)")
     ap.add_argument("--dry-run", action="store_true", help="Print the file name and content only")
     ap.add_argument("--save-to", help="Write the file to this local folder instead of the workspace")
     args = ap.parse_args()
+
+    if args.date and not re.fullmatch(r"\d{8}", args.date):
+        ap.error("--date must be YYYYMMDD, for example 20261124")
+    if not re.fullmatch(r"[A-Za-z0-9_]*", args.prefix):
+        ap.error("--prefix may contain only letters, digits and underscores")
 
     parts, sig = split_name(args.object)
     import snowflake.connector
@@ -212,8 +219,9 @@ def main():
         content, count, warnings = build_content(args.object, obj_type, ddl, parts, args.var_name, not args.no_schema)
         files = list_workspace_files(cur, args.workspace)
         version = next_version(files, args.bump)
-        desc = args.description or "create_%s_%s_%s" % (slug(obj_type), slug(parts[1]), slug(parts[2]))
-        file_name = "V%s__%s.sql" % (version, slug(desc) if args.description else desc)
+        date_tag = args.date or datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d")
+        desc = slug(args.description) if args.description else "%s%s" % (args.prefix, date_tag)
+        file_name = "V%s__%s.sql" % (version, desc)
 
         print("Object   : %s (%s)" % (args.object, obj_type))
         print("File     : %s/%s" % (args.folder.strip("/"), file_name))
