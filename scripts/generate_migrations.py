@@ -9,8 +9,9 @@ from the list; lines that failed stay in the list with a "# FAILED:" comment.
 
 File names follow the pattern  V<next version>__<prefix><YYYYMMDD>.sql
 for example  V1.0.5__deployment20261124.sql
-Every object gets its own file and its own version, so names never collide even
-when several objects are processed on the same day.
+ALL objects of one run go into ONE file with ONE new version, in the order they
+appear in the list (list tables before the views that depend on them). Objects
+that fail stay in the list and are put into a later file when they succeed.
 
 List file format (requests/objects.txt):
     # comment lines and blank lines are ignored
@@ -50,6 +51,7 @@ def process(cur, lines, repo_root, migrations_dir, bump="patch", var="DATABASE",
     date_tag = date_tag or datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d")
     known = repo_files(repo_root)
     created, failed, kept, seen = [], [], [], set()
+    blocks = []                           # (name, type, original list line, generated SQL) for this run
     for raw in lines:
         s = raw.strip()
         if s.startswith("# FAILED:"):
@@ -69,15 +71,8 @@ def process(cur, lines, repo_root, migrations_dir, bump="patch", var="DATABASE",
             parts, _sig = split_name(name)
             obj_type, ddl = fetch_ddl(cur, name, typ)
             content, count, warns = build_content(name, obj_type, ddl, parts, var, add_schema)
-            version = next_version(known, bump)
-            fname = "V%s__%s%s.sql" % (version, prefix, date_tag)
-            os.makedirs(migrations_dir, exist_ok=True)
-            path = os.path.join(migrations_dir, fname)
-            with open(path, "w", encoding="utf-8", newline="\n") as fh:
-                fh.write(content)
-            known.append(path)
-            created.append(path)
-            print("OK      %s (%s) -> %s  [%d database reference(s) parameterized]" % (name, obj_type, fname, count))
+            blocks.append((name, obj_type, raw, content))
+            print("OK      %s (%s)  [%d database reference(s) parameterized]" % (name, obj_type, count))
             for w in warns:
                 print("WARNING %s: %s" % (name, w))
         except Exception as exc:
@@ -86,7 +81,39 @@ def process(cur, lines, repo_root, migrations_dir, bump="patch", var="DATABASE",
             failed.append((name, reason))
             kept += ["# FAILED: " + reason, raw]
             print("FAILED  %s: %s" % (name, reason), file=sys.stderr)
+    if blocks:
+        try:
+            version = next_version(known, bump)
+            fname = "V%s__%s%s.sql" % (version, prefix, date_tag)
+            os.makedirs(migrations_dir, exist_ok=True)
+            path = os.path.join(migrations_dir, fname)
+            with open(path, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(combine(blocks))
+            created.append(path)
+            print("Wrote %s with %d object(s)" % (fname, len(blocks)))
+        except Exception as exc:          # nothing was written: keep every line for the next run
+            reason = " ".join(str(exc).split())[:240] or exc.__class__.__name__
+            for name, _t, raw, _c in blocks:
+                failed.append((name, reason))
+                kept += ["# FAILED: " + reason, raw]
+                print("FAILED  %s: %s" % (name, reason), file=sys.stderr)
     return created, failed, kept
+
+
+def combine(blocks):
+    """One file for all objects, in list order (put tables before the views that use them).
+    The CREATE SCHEMA line is written once per schema; each object keeps its own header comments."""
+    out, seen_schema = [], set()
+    for i, (name, _t, _raw, content) in enumerate(blocks, 1):
+        kept_lines = []
+        for line in content.split("\n"):
+            if line.startswith("CREATE SCHEMA IF NOT EXISTS "):
+                if line in seen_schema:
+                    continue              # already created earlier in this file
+                seen_schema.add(line)
+            kept_lines.append(line)
+        out.append("-- ===== %d/%d: %s =====\n" % (i, len(blocks), name) + "\n".join(kept_lines).rstrip("\n"))
+    return "\n\n".join(out) + "\n"
 
 
 def main():
